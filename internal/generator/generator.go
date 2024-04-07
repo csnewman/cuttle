@@ -5,6 +5,7 @@ import (
 
 	"github.com/csnewman/cuttle/internal/parser"
 	"github.com/dave/jennifer/jen"
+	"github.com/iancoleman/strcase"
 )
 
 const cuttlePkg = "github.com/csnewman/cuttle"
@@ -42,27 +43,118 @@ func (g *Generator) GenerateRepo(repo *parser.Repository) {
 	g.logger.Debug("Generating repository", "name", repo.Name)
 
 	g.file.Type().Id(repo.Name).InterfaceFunc(func(jg *jen.Group) {
+		implName := strcase.ToLowerCamel(repo.Name) + "Impl"
+		dialectsVar := implName + "Dialects"
+
+		g.file.Line()
+		g.file.Type().Id(implName).StructFunc(func(jg *jen.Group) {
+			jg.Id("dialect").Qual(cuttlePkg, "Dialect")
+			jg.Id("dialectIndex").Qual("", "int")
+		})
+
+		g.file.Line()
+		g.file.Var().Id(dialectsVar).Op("=").Index().Qual(cuttlePkg, "Dialect").ValuesFunc(func(jg *jen.Group) {
+			jg.Qual(cuttlePkg, "DialectGeneric")
+		})
+
+		g.file.Line()
+		g.file.Func().Id("New" + repo.Name).ParamsFunc(func(jg *jen.Group) {
+			jg.Id("dialect").Qual(cuttlePkg, "Dialect")
+		}).ParamsFunc(func(jg *jen.Group) {
+			jg.Qual("", repo.Name)
+			jg.Qual("", "error")
+		}).BlockFunc(func(jg *jen.Group) {
+			jg.Id("selected").Op(",").Id("err").
+				Op(":=").
+				Id("dialect").Dot("Select").Params(jen.Id(dialectsVar))
+			jg.If(jen.Id("err").Op("!=").Id("nil")).BlockFunc(func(jg *jen.Group) {
+				jg.Return(jen.Id("nil"), jen.Id("err"))
+			})
+			jg.Line()
+			jg.Return(
+				jen.Op("&").Id(implName).Values(jen.Dict{
+					jen.Id("dialect"):      jen.Id(dialectsVar).Index(jen.Id("selected")),
+					jen.Id("dialectIndex"): jen.Id("selected"),
+				}),
+				jen.Id("nil"),
+			)
+		})
+
 		for _, query := range repo.Queries {
-			jg.Id(query.Name).ParamsFunc(func(jg *jen.Group) {
-				jg.Id("ctx").Qual("context", "Context")
-				jg.Id("tx").Qual(cuttlePkg, "WTx")
-
-				for _, arg := range query.Args {
-					jg.Id(arg.Name).Qual("", arg.Type)
-				}
-			})
-
-			jg.Id(query.Name + "Async").ParamsFunc(func(jg *jen.Group) {
-				jg.Id("tx").Qual(cuttlePkg, "WTx")
-
-				for _, arg := range query.Args {
-					jg.Id(arg.Name).Qual("", arg.Type)
-				}
-
-				jg.Id("callback").Qual(cuttlePkg, "AsyncHandler").Types(
-					jen.Qual(cuttlePkg, "Exec"),
-				)
-			})
+			g.generateQuery(query, jg, implName)
 		}
 	})
+}
+
+func (g *Generator) generateQuery(query *parser.Query, jg *jen.Group, implName string) {
+	g.logger.Debug("Generating query", "name", query.Name)
+
+	var (
+		resultPath string
+		resultType string
+		txType     string
+	)
+
+	resultPath = ""
+	resultType = "int64"
+	txType = "WTx"
+
+	jg.Id(query.Name).ParamsFunc(func(jg *jen.Group) {
+		jg.Id("ctx").Qual("context", "Context")
+		jg.Id("tx").Qual(cuttlePkg, txType)
+
+		for _, arg := range query.Args {
+			jg.Id(arg.Name).Qual("", arg.Type)
+		}
+	}).ParamsFunc(func(jg *jen.Group) {
+		jg.Qual(resultPath, resultType)
+		jg.Id("error")
+	})
+
+	jg.Id(query.Name + "Async").ParamsFunc(func(jg *jen.Group) {
+		jg.Id("tx").Qual(cuttlePkg, "Async"+txType)
+
+		for _, arg := range query.Args {
+			jg.Id(arg.Name).Qual("", arg.Type)
+		}
+
+		jg.Id("callback").Qual(cuttlePkg, "AsyncHandler").Types(
+			jen.Qual(resultPath, resultType),
+		)
+	})
+
+	g.file.Line()
+	g.file.Func().Params(jen.Id("r").Op("*").Id(implName)).Id(query.Name).
+		ParamsFunc(func(jg *jen.Group) {
+			jg.Id("ctx").Qual("context", "Context")
+			jg.Id("tx").Qual(cuttlePkg, txType)
+
+			for _, arg := range query.Args {
+				jg.Id(arg.Name).Qual("", arg.Type)
+			}
+		}).
+		ParamsFunc(func(jg *jen.Group) {
+			jg.Qual(resultPath, resultType)
+			jg.Id("error")
+		}).
+		BlockFunc(func(jg *jen.Group) {
+			_ = jg
+		})
+
+	g.file.Line()
+	g.file.Func().Params(jen.Id("r").Op("*").Id(implName)).Id(query.Name + "Async").
+		ParamsFunc(func(jg *jen.Group) {
+			jg.Id("tx").Qual(cuttlePkg, "Async"+txType)
+
+			for _, arg := range query.Args {
+				jg.Id(arg.Name).Qual("", arg.Type)
+			}
+
+			jg.Id("callback").Qual(cuttlePkg, "AsyncHandler").Types(
+				jen.Qual(resultPath, resultType),
+			)
+		}).
+		BlockFunc(func(jg *jen.Group) {
+			_ = jg
+		})
 }
