@@ -9,16 +9,27 @@ import (
 
 var ErrDocAlreadyExists = errors.New("doc comment already exists")
 
+type Unit struct {
+	Repositories      map[string]*Repository
+	RepositoriesOrder []string
+}
+
 type Repository struct {
 	Name    string
 	Queries []*Query
 }
 
 type Query struct {
+	Name          string
+	Doc           *Doc
+	Args          []*Arg
+	Cols          []*Col
+	Variants      map[string]*Variant
+	VariantsOrder []string
+}
+
+type Variant struct {
 	Name    string
-	Doc     *Doc
-	Args    []*Arg
-	Cols    []*Col
 	Content []string
 }
 
@@ -40,31 +51,25 @@ type parser struct {
 	tz     *Tokenizer
 	logger *slog.Logger
 	queued *Token
+	unit   *Unit
 }
 
-func Parse(in io.Reader, logger *slog.Logger) {
-	tz := NewTokenizer(in)
+func Parse(in io.Reader, file string, logger *slog.Logger) (*Unit, error) {
+	tz := NewTokenizer(in, file)
 
 	p := &parser{
 		tz:     tz,
 		logger: logger,
+		unit: &Unit{
+			Repositories: make(map[string]*Repository),
+		},
 	}
 
 	if err := p.Parse(); err != nil {
-		var el *SrcError
-
-		if errors.As(err, &el) {
-			fmt.Println()
-
-			for i, s := range el.tk.RawLines {
-				fmt.Printf("example.sql:%v: %v\n", el.tk.Start+i, s)
-			}
-
-			fmt.Printf("example.sql:%v-%v: %v\n", el.tk.Start, el.tk.End, el.inner)
-		} else {
-			panic(err)
-		}
+		return nil, err
 	}
+
+	return p.unit, nil
 }
 
 func (p *parser) next() (*Token, error) {
@@ -130,12 +135,9 @@ func (p *parser) Parse() error {
 				return fmt.Errorf("failed to parse migration: %w", err)
 			}
 		} else if dir.Type == DirectiveTypeRepository {
-			repo, err := p.parseRepository(dir)
-			if err != nil {
+			if err := p.parseRepository(dir); err != nil {
 				return fmt.Errorf("failed to parse repository: %w", err)
 			}
-
-			_ = repo
 		} else {
 			return wrapSrcError(tk, "%w: unexpected top level directive: %v", ErrInvalidInput, dir.Type)
 		}
@@ -174,23 +176,30 @@ func (p *parser) parseMigration(_ *Directive) error {
 	return nil
 }
 
-func (p *parser) parseRepository(dir *Directive) (*Repository, error) {
-	repo := &Repository{}
-	ok := false
-
-	repo.Name, ok = dir.Values["name"]
+func (p *parser) parseRepository(dir *Directive) error {
+	name, ok := dir.Values["name"]
 	if !ok {
-		return nil, wrapSrcError(dir.Token, "%w: no name provided", ErrInvalidInput)
+		return wrapSrcError(dir.Token, "%w: no name provided", ErrInvalidInput)
 	}
 
-	p.logger.Debug("Parsing repository", "name", repo.Name)
+	p.logger.Debug("Parsing repository", "name", name)
+
+	repo, ok := p.unit.Repositories[name]
+	if !ok {
+		repo = &Repository{
+			Name: name,
+		}
+
+		p.unit.Repositories[name] = repo
+		p.unit.RepositoriesOrder = append(p.unit.RepositoriesOrder, name)
+	}
 
 	for {
 		tk, err := p.next()
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return nil, wrapSrcError(tk, "failed to parse repository token: %w", err)
+			return wrapSrcError(tk, "failed to parse repository token: %w", err)
 		}
 
 		if tk.Type != TokenTypeDirective {
@@ -199,7 +208,7 @@ func (p *parser) parseRepository(dir *Directive) (*Repository, error) {
 
 		dir, err := tk.ParseDirective()
 		if err != nil {
-			return nil, wrapSrcError(tk, "failed to parse repository directive: %w", err)
+			return wrapSrcError(tk, "failed to parse repository directive: %w", err)
 		}
 
 		if dir.Type == DirectiveTypeMigration || dir.Type == DirectiveTypeRepository {
@@ -211,20 +220,22 @@ func (p *parser) parseRepository(dir *Directive) (*Repository, error) {
 		if dir.Type == DirectiveTypeQuery {
 			query, err := p.parseQuery(dir)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse query: %w", err)
+				return fmt.Errorf("failed to parse query: %w", err)
 			}
 
 			repo.Queries = append(repo.Queries, query)
 		} else {
-			return nil, wrapSrcError(tk, "%w: unexpected repository directive: %v", ErrInvalidInput, dir.Type)
+			return wrapSrcError(tk, "%w: unexpected repository directive: %v", ErrInvalidInput, dir.Type)
 		}
 	}
 
-	return repo, nil
+	return nil
 }
 
 func (p *parser) parseQuery(dir *Directive) (*Query, error) {
-	query := &Query{}
+	query := &Query{
+		Variants: make(map[string]*Variant),
+	}
 	ok := false
 
 	query.Name, ok = dir.Values["name"]
@@ -233,6 +244,8 @@ func (p *parser) parseQuery(dir *Directive) (*Query, error) {
 	}
 
 	p.logger.Debug("Parsing query", "name", query.Name)
+
+	dialect := "generic"
 
 	for {
 		tk, err := p.next()
@@ -243,7 +256,17 @@ func (p *parser) parseQuery(dir *Directive) (*Query, error) {
 		}
 
 		if tk.Type == TokenTypeText {
-			query.Content = append(query.Content, tk.Content...)
+			variant, ok := query.Variants[dialect]
+			if !ok {
+				variant = &Variant{
+					Name: dialect,
+				}
+
+				query.Variants[dialect] = variant
+				query.VariantsOrder = append(query.VariantsOrder, dialect)
+			}
+
+			variant.Content = append(variant.Content, tk.Content...)
 
 			continue
 		}
@@ -291,6 +314,12 @@ func (p *parser) parseQuery(dir *Directive) (*Query, error) {
 			}
 
 			query.Doc = d
+
+		case DirectiveTypeDialect:
+			dialect, ok = dir.Values["name"]
+			if !ok {
+				return nil, wrapSrcError(dir.Token, "%w: no name provided", ErrInvalidInput)
+			}
 
 		default:
 			return nil, wrapSrcError(tk, "%w: unexpected query directive: %v", ErrInvalidInput, dir.Type)

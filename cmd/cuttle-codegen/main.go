@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -10,7 +12,9 @@ import (
 )
 
 func main() {
-	file, err := os.Open("example.sql")
+	path := "example.sql"
+
+	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -30,5 +34,25 @@ func main() {
 		},
 	}))
 
-	parser.Parse(file, logger)
+	unit, err := parser.Parse(file, path, logger)
+
+	if err != nil {
+		var el *parser.SrcError
+
+		if errors.As(err, &el) {
+			fmt.Println()
+
+			for i, s := range el.Token.RawLines {
+				fmt.Printf("%v:%v: %v\n", el.Token.Source, el.Token.Start+i, s)
+			}
+
+			fmt.Printf("%v:%v-%v: %v\n", el.Token.Source, el.Token.Start, el.Token.End, el.Inner)
+
+			return
+		}
+
+		panic(err)
+	}
+
+	_ = unit
 }

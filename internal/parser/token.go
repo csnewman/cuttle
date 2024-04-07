@@ -32,6 +32,7 @@ const (
 	DirectiveTypeArg        = "arg"
 	DirectiveTypeDoc        = "doc"
 	DirectiveTypeCol        = "col"
+	DirectiveTypeDialect    = "dialect"
 )
 
 type Token struct {
@@ -142,14 +143,16 @@ func (t *Token) ParseDirective() (*Directive, error) {
 type Tokenizer struct {
 	scanner *bufio.Scanner
 	queued  *Token
+	file    string
 	line    int
 }
 
-func NewTokenizer(in io.Reader) *Tokenizer {
+func NewTokenizer(in io.Reader, file string) *Tokenizer {
 	scanner := bufio.NewScanner(in)
 
 	return &Tokenizer{
 		scanner: scanner,
+		file:    file,
 		line:    -1,
 	}
 }
@@ -181,7 +184,7 @@ func (t *Tokenizer) Next() (*Token, error) {
 
 				tk := &Token{
 					Type:     TokenTypeDirective,
-					Source:   "",
+					Source:   t.file,
 					Start:    t.line,
 					End:      t.line,
 					Content:  []string{cmd},
@@ -216,7 +219,7 @@ func (t *Tokenizer) Next() (*Token, error) {
 
 	return &Token{
 		Type:     TokenTypeText,
-		Source:   "",
+		Source:   t.file,
 		Start:    textStart,
 		End:      textEnd,
 		Content:  text,

@@ -3,14 +3,14 @@ package parser
 import "fmt"
 
 type SrcError struct {
-	tk    *Token
-	inner error
+	Token *Token
+	Inner error
 }
 
 func newSrcError(tk *Token, inner error) *SrcError {
 	return &SrcError{
-		tk:    tk,
-		inner: inner,
+		Token: tk,
+		Inner: inner,
 	}
 }
 
@@ -19,5 +19,5 @@ func wrapSrcError(tk *Token, format string, a ...any) *SrcError {
 }
 
 func (e *SrcError) Error() string {
-	return fmt.Sprintf("%v-%v: %v", e.tk.Start, e.tk.End, e.inner)
+	return fmt.Sprintf("%v-%v: %v", e.Token.Start, e.Token.End, e.Inner)
 }
