@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/csnewman/cuttle/internal/generator"
 	"github.com/csnewman/cuttle/internal/parser"
 )
 
@@ -35,7 +36,6 @@ func main() {
 	}))
 
 	unit, err := parser.Parse(file, path, logger)
-
 	if err != nil {
 		var el *parser.SrcError
 
@@ -54,5 +54,7 @@ func main() {
 		panic(err)
 	}
 
-	_ = unit
+	if err := generator.Generate(unit, logger, "example.gen.go"); err != nil {
+		panic(err)
+	}
 }
