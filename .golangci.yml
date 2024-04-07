@@ -29,6 +29,7 @@ linters:
     - cyclop
     - forbidigo
     - nestif
+    - gocognit
 linters-settings:
   gocritic:
     disabled-checks:
