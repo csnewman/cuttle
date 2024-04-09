@@ -19,9 +19,9 @@ type DB interface {
 }
 
 type RTx interface {
-	Query(stmt string, args ...any) (Rows, error)
+	Query(ctx context.Context, stmt string, args ...any) (Rows, error)
 
-	QueryRow(stmt string, args ...any) (Row, error)
+	QueryRow(ctx context.Context, stmt string, args ...any) (Row, error)
 }
 
 type WTx interface {
@@ -32,7 +32,9 @@ type WTx interface {
 
 type AsyncHandler[T any] func(ctx context.Context, result T, err error) error
 
-type Exec interface{}
+type Exec interface {
+	RowsAffected() int64
+}
 
 type Row interface{}
 

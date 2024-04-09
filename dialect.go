@@ -52,20 +52,31 @@ func (d Dialect) Select(dialects []Dialect) (int, error) {
 	return selected, nil
 }
 
-var DialectGeneric = Dialect{
-	Name: "generic",
-	Compat: func(Dialect) uint {
-		return 0
-	},
-}
+var (
+	DialectGeneric = Dialect{
+		Name: "generic",
+		Compat: func(Dialect) uint {
+			return 0
+		},
+	}
+	DialectSQLite = Dialect{
+		Name: "sqlite",
+		Compat: func(dialect Dialect) uint {
+			if dialect.Is(DialectGeneric) {
+				return 100
+			}
 
-var DialectSQLite = Dialect{
-	Name: "sqlite",
-	Compat: func(dialect Dialect) uint {
-		if dialect.Is(DialectGeneric) {
-			return 100
-		}
+			return 0
+		},
+	}
+	DialectPostgres = Dialect{
+		Name: "postgres",
+		Compat: func(dialect Dialect) uint {
+			if dialect.Is(DialectGeneric) {
+				return 100
+			}
 
-		return 0
-	},
-}
+			return 0
+		},
+	}
+)
