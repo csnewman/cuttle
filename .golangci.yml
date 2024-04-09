@@ -30,6 +30,8 @@ linters:
     - forbidigo
     - nestif
     - gocognit
+    - goconst
+    - ireturn
 linters-settings:
   gocritic:
     disabled-checks:
