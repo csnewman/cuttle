@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
+	"strings"
 )
 
 var ErrDocAlreadyExists = errors.New("doc comment already exists")
@@ -15,22 +18,23 @@ type Unit struct {
 }
 
 type Repository struct {
-	Name    string
-	Queries []*Query
+	Name     string
+	Queries  []*Query
+	Dialects []string
 }
 
 type Query struct {
-	Name          string
-	Doc           *Doc
-	Args          []*Arg
-	Cols          []*Col
-	Variants      map[string]*Variant
-	VariantsOrder []string
+	Name     string
+	Doc      *Doc
+	Args     []*Arg
+	Cols     []*Col
+	Variants map[string]*Variant
 }
 
 type Variant struct {
 	Name    string
 	Content []string
+	Stmt    string
 }
 
 type Doc struct {
@@ -194,6 +198,15 @@ func (p *parser) parseRepository(dir *Directive) error {
 		p.unit.RepositoriesOrder = append(p.unit.RepositoriesOrder, name)
 	}
 
+	rawDialects, ok := dir.Values["dialects"]
+	if ok {
+		repo.Dialects = strings.Split(rawDialects, ",")
+		slices.Sort(repo.Dialects)
+		repo.Dialects = slices.Compact(repo.Dialects)
+	} else {
+		repo.Dialects = []string{"generic"}
+	}
+
 	for {
 		tk, err := p.next()
 		if errors.Is(err, io.EOF) {
@@ -218,7 +231,7 @@ func (p *parser) parseRepository(dir *Directive) error {
 		}
 
 		if dir.Type == DirectiveTypeQuery {
-			query, err := p.parseQuery(dir)
+			query, err := p.parseQuery(dir, repo.Dialects)
 			if err != nil {
 				return fmt.Errorf("failed to parse query: %w", err)
 			}
@@ -232,7 +245,7 @@ func (p *parser) parseRepository(dir *Directive) error {
 	return nil
 }
 
-func (p *parser) parseQuery(dir *Directive) (*Query, error) {
+func (p *parser) parseQuery(dir *Directive, repoDialects []string) (*Query, error) {
 	query := &Query{
 		Variants: make(map[string]*Variant),
 	}
@@ -245,7 +258,8 @@ func (p *parser) parseQuery(dir *Directive) (*Query, error) {
 
 	p.logger.Debug("Parsing query", "name", query.Name)
 
-	dialect := "generic"
+	dialects := []string{""}
+	seenDialects := make(map[string]struct{})
 
 	for {
 		tk, err := p.next()
@@ -256,17 +270,18 @@ func (p *parser) parseQuery(dir *Directive) (*Query, error) {
 		}
 
 		if tk.Type == TokenTypeText {
-			variant, ok := query.Variants[dialect]
-			if !ok {
-				variant = &Variant{
-					Name: dialect,
+			for _, dialect := range dialects {
+				variant, ok := query.Variants[dialect]
+				if !ok {
+					variant = &Variant{
+						Name: dialect,
+					}
+
+					query.Variants[dialect] = variant
 				}
 
-				query.Variants[dialect] = variant
-				query.VariantsOrder = append(query.VariantsOrder, dialect)
+				variant.Content = append(variant.Content, tk.Content...)
 			}
-
-			variant.Content = append(variant.Content, tk.Content...)
 
 			continue
 		}
@@ -316,14 +331,73 @@ func (p *parser) parseQuery(dir *Directive) (*Query, error) {
 			query.Doc = d
 
 		case DirectiveTypeDialect:
-			dialect, ok = dir.Values["name"]
+			rawDialect, ok := dir.Values["name"]
 			if !ok {
 				return nil, wrapSrcError(dir.Token, "%w: no name provided", ErrInvalidInput)
+			}
+
+			dialects = strings.Split(rawDialect, ",")
+			slices.Sort(dialects)
+			dialects = slices.Compact(dialects)
+
+			for _, dialect := range dialects {
+				if _, ok := seenDialects[dialect]; ok {
+					return nil, wrapSrcError(tk, "%w: dialect already seen: %v", ErrInvalidInput, dialect)
+				}
+
+				if !slices.Contains(repoDialects, dialect) {
+					return nil, wrapSrcError(tk, "%w: dialect not defined for repository: %v", ErrInvalidInput, dialect)
+				}
+
+				seenDialects[dialect] = struct{}{}
 			}
 
 		default:
 			return nil, wrapSrcError(tk, "%w: unexpected query directive: %v", ErrInvalidInput, dir.Type)
 		}
+	}
+
+	for _, variant := range query.Variants {
+		for j, l := range variant.Content {
+			l = strings.TrimSpace(l)
+
+			if strings.HasPrefix(l, "--") {
+				continue
+			}
+
+			if j > 0 {
+				variant.Stmt += "\n" + l
+			} else {
+				variant.Stmt += l
+			}
+		}
+
+		variant.Stmt = strings.TrimSpace(variant.Stmt)
+		variant.Stmt = strings.TrimSuffix(variant.Stmt, ";")
+		variant.Stmt = strings.TrimSpace(variant.Stmt)
+	}
+
+	maps.DeleteFunc(query.Variants, func(_ string, variant *Variant) bool {
+		return variant.Stmt == ""
+	})
+
+	if variant, ok := query.Variants[""]; ok {
+		if len(query.Variants) != 1 {
+			return nil, wrapSrcError(dir.Token, "%w: query contains sql outside of a dialect", ErrInvalidInput)
+		}
+
+		if len(repoDialects) > 1 {
+			return nil, wrapSrcError(dir.Token, "%w: unable to infer dialect as repository supports multiple", ErrInvalidInput)
+		}
+
+		variant.Name = repoDialects[0]
+		query.Variants[variant.Name] = variant
+
+		delete(query.Variants, "")
+	}
+
+	if len(query.Variants) == 0 {
+		return nil, wrapSrcError(dir.Token, "%w: no sql found", ErrInvalidInput)
 	}
 
 	return query, nil

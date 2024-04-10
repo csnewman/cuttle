@@ -153,7 +153,7 @@ func NewTokenizer(in io.Reader, file string) *Tokenizer {
 	return &Tokenizer{
 		scanner: scanner,
 		file:    file,
-		line:    -1,
+		line:    0,
 	}
 }
 

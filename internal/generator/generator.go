@@ -3,11 +3,11 @@ package generator
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/csnewman/cuttle/internal/parser"
 	"github.com/dave/jennifer/jen"
 	"github.com/iancoleman/strcase"
+	"golang.org/x/exp/maps"
 )
 
 const cuttlePkg = "github.com/csnewman/cuttle"
@@ -140,33 +140,13 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 
 		var cases []jen.Code
 
-		for i, vname := range query.VariantsOrder {
+		for i, vname := range maps.Keys(query.Variants) {
 			variant := query.Variants[vname]
 
 			cases = append(cases, jen.Case(jen.Lit(i)).BlockFunc(func(jg *jen.Group) {
-				stmt := ""
+				stmt := fmt.Sprintf("/* %v:%v */ %v", repo.Name, query.Name, variant.Stmt)
 
-				for j, l := range variant.Content {
-					l = strings.TrimSpace(l)
-
-					if strings.HasPrefix(l, "--") {
-						continue
-					}
-
-					if j > 0 {
-						stmt += "\n" + l
-					} else {
-						stmt += l
-					}
-				}
-
-				stmt = strings.TrimSpace(stmt)
-				stmt = strings.TrimSuffix(stmt, ";")
-				stmt = strings.TrimSpace(stmt)
-
-				stmt = fmt.Sprintf("/* %v:%v */ %v", repo.Name, query.Name, stmt)
-
-				jg.Comment("language=sql")
+				jg.Comment("language=" + variant.Name)
 				jg.Id("cuttleStmt").Op("=").Custom(jen.Options{
 					Open:      "`",
 					Close:     "`",
