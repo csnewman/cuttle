@@ -9,11 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var (
-	_ cuttle.DB  = (*DB)(nil)
-	_ cuttle.RTx = (*RTx)(nil)
-	_ cuttle.WTx = (*WTx)(nil)
-)
+var _ cuttle.DB = (*DB)(nil)
 
 type DB struct {
 	pool *pgxpool.Pool
@@ -67,6 +63,18 @@ func (d *DB) Exec(ctx context.Context, stmt string, args ...any) (cuttle.Exec, e
 	return res, err
 }
 
+func (d *DB) DispatchBatchR(ctx context.Context, b *cuttle.BatchR) error {
+	return d.RTx(ctx, func(ctx context.Context, tx cuttle.RTx) error {
+		return tx.DispatchBatchR(ctx, b)
+	})
+}
+
+func (d *DB) DispatchBatchRW(ctx context.Context, b *cuttle.BatchRW) error {
+	return d.WTx(ctx, func(ctx context.Context, tx cuttle.WTx) error {
+		return tx.DispatchBatchRW(ctx, b)
+	})
+}
+
 func (d *DB) RTx(ctx context.Context, f cuttle.RTxFunc) error {
 	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -109,47 +117,12 @@ func (d *DB) Dialect() cuttle.Dialect {
 	return cuttle.DialectPostgres
 }
 
-type RTx struct {
-	tx pgx.Tx
-}
-
 type Rows struct {
 	res pgx.Rows
 }
 
-func (t *RTx) Query(ctx context.Context, stmt string, args ...any) (cuttle.Rows, error) {
-	res, err := t.tx.Query(ctx, stmt, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Rows{res: res}, nil
-}
-
 type Row struct {
 	res pgx.Rows
-}
-
-func (t *RTx) QueryRow(ctx context.Context, stmt string, args ...any) (cuttle.Row, error) {
-	res, err := t.tx.Query(ctx, stmt, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Row{res: res}, nil
-}
-
-type WTx struct {
-	RTx
-}
-
-func (t *WTx) Exec(ctx context.Context, stmt string, args ...any) (cuttle.Exec, error) {
-	res, err := t.tx.Exec(ctx, stmt, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Exec{res: res}, nil
 }
 
 type Exec struct {

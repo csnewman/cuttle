@@ -228,6 +228,33 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 			generateStmtSelector(jg)
 
 			jg.Line()
-			jg.Id("_").Op("=").Id("cuttleStmt")
+
+			jg.Id("tx").Dot("Exec").
+				ParamsFunc(func(jg *jen.Group) {
+					jg.Line().Func().
+						ParamsFunc(func(jg *jen.Group) {
+							jg.Id("ctx").Qual("context", "Context")
+							jg.Id("result").Qual(cuttlePkg, "Exec")
+							jg.Id("err").Qual("", "error")
+						}).
+						Qual("", "error").
+						BlockFunc(func(jg *jen.Group) {
+							jg.ReturnFunc(func(jg *jen.Group) {
+								jg.Id("callback").ParamsFunc(func(jg *jen.Group) {
+									jg.Id("ctx")
+									jg.Id("result").Dot("RowsAffected").Params()
+									jg.Id("err")
+								})
+							})
+						})
+
+					jg.Line().Id("cuttleStmt")
+
+					for _, arg := range query.Args {
+						jg.Line().Id(arg.Name)
+					}
+
+					jg.Line()
+				})
 		})
 }

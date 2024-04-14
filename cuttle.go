@@ -22,12 +22,16 @@ type RTx interface {
 	Query(ctx context.Context, stmt string, args ...any) (Rows, error)
 
 	QueryRow(ctx context.Context, stmt string, args ...any) (Row, error)
+
+	DispatchBatchR(ctx context.Context, b *BatchR) error
 }
 
 type WTx interface {
 	RTx
 
 	Exec(ctx context.Context, stmt string, args ...any) (Exec, error)
+
+	DispatchBatchRW(ctx context.Context, b *BatchRW) error
 }
 
 type AsyncHandler[T any] func(ctx context.Context, result T, err error) error
@@ -51,64 +55,3 @@ type AsyncWTx interface {
 
 	Exec(handler AsyncHandler[Exec], stmt string, args ...any)
 }
-
-type BatchEntry struct {
-	Stmt         string
-	Args         []any
-	ExecHandler  AsyncHandler[Exec]
-	QueryHandler AsyncHandler[Rows]
-}
-
-type BatchRW struct {
-	Entries []*BatchEntry
-}
-
-func NewBatchRW() *BatchRW {
-	return &BatchRW{}
-}
-
-func (b *BatchRW) Exec(handler AsyncHandler[Exec], stmt string, args ...any) {
-	b.Entries = append(b.Entries, &BatchEntry{
-		Stmt:        stmt,
-		Args:        args,
-		ExecHandler: handler,
-	})
-}
-
-func (b *BatchRW) Query(handler AsyncHandler[Rows], stmt string, args ...any) {
-	b.Entries = append(b.Entries, &BatchEntry{
-		Stmt:         stmt,
-		Args:         args,
-		QueryHandler: handler,
-	})
-}
-
-func (b *BatchRW) QueryRow(handler AsyncHandler[Row], stmt string, args ...any) { //nolint:revive
-	panic("implement me")
-}
-
-type BatchR struct {
-	Entries []*BatchEntry
-}
-
-func NewBatchR() *BatchR {
-	return &BatchR{}
-}
-
-func (b *BatchR) Query(handler AsyncHandler[Rows], stmt string, args ...any) {
-	b.Entries = append(b.Entries, &BatchEntry{
-		Stmt:         stmt,
-		Args:         args,
-		QueryHandler: handler,
-	})
-}
-
-func (b *BatchR) QueryRow(handler AsyncHandler[Row], stmt string, args ...any) { //nolint:revive
-	panic("implement me")
-}
-
-var (
-	_ AsyncRTx = (*BatchR)(nil)
-	_ AsyncRTx = (*BatchRW)(nil)
-	_ AsyncWTx = (*BatchRW)(nil)
-)
