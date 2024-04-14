@@ -7,7 +7,6 @@ import (
 	"github.com/csnewman/cuttle/internal/parser"
 	"github.com/dave/jennifer/jen"
 	"github.com/iancoleman/strcase"
-	"golang.org/x/exp/maps"
 )
 
 const cuttlePkg = "github.com/csnewman/cuttle"
@@ -56,7 +55,14 @@ func (g *Generator) GenerateRepo(repo *parser.Repository) {
 
 		g.file.Line()
 		g.file.Var().Id(dialectsVar).Op("=").Index().Qual(cuttlePkg, "Dialect").ValuesFunc(func(jg *jen.Group) {
-			jg.Line().Qual(cuttlePkg, "DialectGeneric")
+			for _, dialect := range repo.Dialects {
+				cfg, ok := dialectConfigs[dialect]
+				if !ok {
+					panic("unknown dialect: " + dialect)
+				}
+
+				jg.Line().Qual(cuttlePkg, cfg.VarName)
+			}
 
 			jg.Line()
 		})
@@ -140,13 +146,14 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 
 		var cases []jen.Code
 
-		for i, vname := range maps.Keys(query.Variants) {
-			variant := query.Variants[vname]
+		for i, dialect := range repo.Dialects {
+			variant := query.Variants[dialect]
+			cfg := dialectConfigs[dialect]
 
 			cases = append(cases, jen.Case(jen.Lit(i)).BlockFunc(func(jg *jen.Group) {
 				stmt := fmt.Sprintf("/* %v:%v */ %v", repo.Name, query.Name, variant.Stmt)
 
-				jg.Comment("language=" + variant.Name)
+				jg.Comment("language=" + cfg.IDEName)
 				jg.Id("cuttleStmt").Op("=").Custom(jen.Options{
 					Open:      "`",
 					Close:     "`",
