@@ -28,7 +28,11 @@ func main() {
 			if len(groups) == 0 && a.Key == slog.SourceKey {
 				//nolint:forcetypeassert
 				source := a.Value.Any().(*slog.Source)
-				source.File = strings.TrimPrefix(source.File, "github.com/csnewman/cuttle/")
+				parts := strings.Split(source.File, "/")
+
+				if len(parts) > 1 {
+					source.File = parts[len(parts)-2] + "/" + parts[len(parts)-1]
+				}
 			}
 
 			return a
