@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/csnewman/cuttle"
 	"github.com/jackc/pgx/v5"
@@ -21,46 +22,37 @@ func FromPool(pool *pgxpool.Pool) *DB {
 	}
 }
 
-func (d *DB) Query(ctx context.Context, stmt string, args ...any) (cuttle.Rows, error) {
-	var res cuttle.Rows
+func (d *DB) ExecFunc(ctx context.Context, handler cuttle.TxFunc[cuttle.Exec], stmt string, args ...any) error {
+	return d.WTx(ctx, func(ctx context.Context, tx cuttle.WTx) error {
+		res, err := tx.Exec(ctx, stmt, args...)
+		if err != nil {
+			return err
+		}
 
-	err := d.WTx(ctx, func(ctx context.Context, tx cuttle.WTx) error {
-		innerRes, err := tx.Query(ctx, stmt, args...)
-
-		res = innerRes
-
-		return err
+		return handler(ctx, res)
 	})
-
-	return res, err
 }
 
-func (d *DB) QueryRow(ctx context.Context, stmt string, args ...any) (cuttle.Row, error) {
-	var res cuttle.Row
+func (d *DB) QueryFunc(ctx context.Context, handler cuttle.TxFunc[cuttle.Rows], stmt string, args ...any) error {
+	return d.RTx(ctx, func(ctx context.Context, tx cuttle.RTx) error {
+		res, err := tx.Query(ctx, stmt, args...)
+		if err != nil {
+			return err
+		}
 
-	err := d.WTx(ctx, func(ctx context.Context, tx cuttle.WTx) error {
-		innerRes, err := tx.QueryRow(ctx, stmt, args...)
-
-		res = innerRes
-
-		return err
+		return handler(ctx, res)
 	})
-
-	return res, err
 }
 
-func (d *DB) Exec(ctx context.Context, stmt string, args ...any) (cuttle.Exec, error) {
-	var res cuttle.Exec
+func (d *DB) QueryRowFunc(ctx context.Context, handler cuttle.TxFunc[cuttle.Row], stmt string, args ...any) error {
+	return d.RTx(ctx, func(ctx context.Context, tx cuttle.RTx) error {
+		res, err := tx.QueryRow(ctx, stmt, args...)
+		if err != nil {
+			return err
+		}
 
-	err := d.WTx(ctx, func(ctx context.Context, tx cuttle.WTx) error {
-		innerRes, err := tx.Exec(ctx, stmt, args...)
-
-		res = innerRes
-
-		return err
+		return handler(ctx, res)
 	})
-
-	return res, err
 }
 
 func (d *DB) DispatchBatchR(ctx context.Context, b *cuttle.BatchR) error {
@@ -103,11 +95,11 @@ func (d *DB) WTx(ctx context.Context, f cuttle.WTxFunc) error {
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := f(ctx, &WTx{RTx{tx: tx}}); err != nil {
-		return err
+		return fmt.Errorf("error during tx: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return err
+		return fmt.Errorf("error during commit: %w", err)
 	}
 
 	return nil
@@ -123,6 +115,10 @@ type Rows struct {
 
 type Row struct {
 	res pgx.Rows
+}
+
+func (r *Row) Scan(dest ...any) error {
+	return r.res.Scan(dest...)
 }
 
 type Exec struct {

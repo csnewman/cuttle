@@ -16,6 +16,15 @@ type RTx struct {
 	tx pgx.Tx
 }
 
+func (t *RTx) QueryFunc(ctx context.Context, handler cuttle.TxFunc[cuttle.Rows], stmt string, args ...any) error {
+	res, err := t.Query(ctx, stmt, args...)
+	if err != nil {
+		return err
+	}
+
+	return handler(ctx, res)
+}
+
 func (t *RTx) Query(ctx context.Context, stmt string, args ...any) (cuttle.Rows, error) {
 	res, err := t.tx.Query(ctx, stmt, args...)
 	if err != nil {
@@ -25,13 +34,41 @@ func (t *RTx) Query(ctx context.Context, stmt string, args ...any) (cuttle.Rows,
 	return &Rows{res: res}, nil
 }
 
+func (t *RTx) QueryRowFunc(ctx context.Context, handler cuttle.TxFunc[cuttle.Row], stmt string, args ...any) error {
+	res, err := t.QueryRow(ctx, stmt, args...)
+	if err != nil {
+		return err
+	}
+
+	return handler(ctx, res)
+}
+
 func (t *RTx) QueryRow(ctx context.Context, stmt string, args ...any) (cuttle.Row, error) {
 	res, err := t.tx.Query(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}
 
+	// Next loads the row into memory, making it safe to read after closing the reader
+	if !res.Next() {
+		if res.Err() == nil {
+			return nil, cuttle.ErrNoRows
+		}
+
+		return nil, res.Err()
+	}
+
+	res.Close()
+
+	if res.Err() != nil {
+		return nil, res.Err()
+	}
+
 	return &Row{res: res}, nil
+}
+
+func (t *RTx) DispatchBatchR(ctx context.Context, b *cuttle.BatchR) error {
+	return t.dispatchBatch(ctx, b.Entries)
 }
 
 func (t *RTx) dispatchBatch(ctx context.Context, entries []*cuttle.BatchEntry) error {
@@ -63,12 +100,17 @@ func (t *RTx) dispatchBatch(ctx context.Context, entries []*cuttle.BatchEntry) e
 	return nil
 }
 
-func (t *RTx) DispatchBatchR(ctx context.Context, b *cuttle.BatchR) error {
-	return t.dispatchBatch(ctx, b.Entries)
-}
-
 type WTx struct {
 	RTx
+}
+
+func (t *WTx) ExecFunc(ctx context.Context, handler cuttle.TxFunc[cuttle.Exec], stmt string, args ...any) error {
+	res, err := t.Exec(ctx, stmt, args...)
+	if err != nil {
+		return err
+	}
+
+	return handler(ctx, res)
 }
 
 func (t *WTx) Exec(ctx context.Context, stmt string, args ...any) (cuttle.Exec, error) {
