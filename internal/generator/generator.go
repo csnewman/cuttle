@@ -102,18 +102,49 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 	g.logger.Debug("Generating query", "name", query.Name)
 
 	var (
-		resultPath string
-		resultType string
-		txType     string
+		resultPath  string
+		resultType  string
+		txType      string
+		queryFunc   string
+		queryResult string
 	)
 
-	resultPath = ""
-	resultType = "int64"
 	txType = "WTx"
+
+	switch query.Mode {
+	case parser.ModeExec:
+		queryFunc = "Exec"
+		queryResult = "Exec"
+		resultPath = ""
+		resultType = "int64"
+
+	case parser.ModeQueryMany:
+		queryFunc = "Query"
+		queryResult = "Rows"
+
+		panic("todo")
+
+	case parser.ModeQueryRow:
+		queryFunc = "QueryRow"
+		queryResult = "Row"
+
+		if len(query.Cols) == 1 {
+			resultPath = ""
+			resultType = query.Cols[0].Type
+		} else {
+			panic("todo")
+		}
+
+		resultPath = ""
+		resultType = "int64"
+
+	default:
+		panic("unexpected " + query.Mode)
+	}
 
 	jg.Id(query.Name).ParamsFunc(func(jg *jen.Group) {
 		jg.Line().Id("ctx").Qual("context", "Context")
-		jg.Line().Id("tx").Qual(cuttlePkg, txType)
+		jg.Line().Id("tx").Qual(cuttlePkg, txType+"Funcer")
 
 		for _, arg := range query.Args {
 			jg.Line().Id(arg.Name).Qual("", arg.Type)
@@ -172,7 +203,7 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 	g.file.Func().Params(jen.Id("r").Op("*").Id(implName)).Id(query.Name).
 		ParamsFunc(func(jg *jen.Group) {
 			jg.Line().Id("ctx").Qual("context", "Context")
-			jg.Line().Id("tx").Qual(cuttlePkg, txType)
+			jg.Line().Id("tx").Qual(cuttlePkg, txType+"Funcer")
 
 			for _, arg := range query.Args {
 				jg.Line().Id(arg.Name).Qual("", arg.Type)
@@ -186,13 +217,39 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 		}).
 		BlockFunc(func(jg *jen.Group) {
 			generateStmtSelector(jg)
-
 			jg.Line()
 
-			jg.Id("cuttleRes").Op(",").Id("cuttleErr").Op(":=").
-				Id("tx").Dot("Exec").
+			jg.Var().Id("cuttleResValue").Qual(resultPath, resultType)
+			jg.Line()
+
+			jg.Id("cuttleErr").Op(":=").Id("tx").Dot(queryFunc + "Func").
 				ParamsFunc(func(jg *jen.Group) {
 					jg.Line().Id("ctx")
+					jg.Line().Func().
+						ParamsFunc(func(jg *jen.Group) {
+							jg.Id("ctx").Qual("context", "Context")
+							jg.Id("result").Qual(cuttlePkg, queryResult)
+						}).
+						Qual("", "error").
+						BlockFunc(func(jg *jen.Group) {
+							switch query.Mode {
+							case parser.ModeExec:
+								jg.Id("cuttleResValue").Op("=").Id("result").Dot("RowsAffected").Params()
+								jg.Line()
+								jg.Return(jen.Id("nil"))
+
+							case parser.ModeQueryRow:
+								jg.Return(jen.Id("result").
+									Dot("Scan").
+									ParamsFunc(func(g *jen.Group) {
+										g.Op("&").Id("cuttleResValue")
+									}))
+
+							default:
+								panic("unexpected " + query.Mode)
+							}
+						})
+
 					jg.Line().Id("cuttleStmt")
 
 					for _, arg := range query.Args {
@@ -202,11 +259,8 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 					jg.Line()
 				})
 
-			jg.If(jen.Id("cuttleErr").Op("!=").Nil()).
-				Block(jen.Return(jen.Id("-1"), jen.Id("cuttleErr")))
-
 			jg.Line()
-			jg.Return(jen.Id("cuttleRes").Dot("RowsAffected").Params(), jen.Nil())
+			jg.Return(jen.Id("cuttleResValue"), jen.Id("cuttleErr"))
 		})
 
 	g.file.Line()
@@ -229,23 +283,48 @@ func (g *Generator) generateQuery(repo *parser.Repository, query *parser.Query, 
 
 			jg.Line()
 
-			jg.Id("tx").Dot("Exec").
+			jg.Id("tx").Dot(queryFunc).
 				ParamsFunc(func(jg *jen.Group) {
 					jg.Line().Func().
 						ParamsFunc(func(jg *jen.Group) {
 							jg.Id("ctx").Qual("context", "Context")
-							jg.Id("result").Qual(cuttlePkg, "Exec")
+							jg.Id("result").Qual(cuttlePkg, queryResult)
 							jg.Id("err").Qual("", "error")
 						}).
 						Qual("", "error").
 						BlockFunc(func(jg *jen.Group) {
-							jg.ReturnFunc(func(jg *jen.Group) {
-								jg.Id("callback").ParamsFunc(func(jg *jen.Group) {
-									jg.Id("ctx")
-									jg.Id("result").Dot("RowsAffected").Params()
-									jg.Id("err")
-								})
-							})
+							switch query.Mode {
+							case parser.ModeExec:
+								jg.Var().Id("cuttleResValue").Qual("", "int64")
+								jg.Line()
+
+								jg.If(jen.Id("err").Op("==").Id("nil")).Block(
+									jen.Id("cuttleResValue").Op("=").Id("result").Dot("RowsAffected").Params(),
+								)
+								jg.Line()
+
+							case parser.ModeQueryRow:
+								jg.Var().Id("cuttleResValue").Qual(resultPath, resultType)
+								jg.Line()
+
+								jg.If(jen.Id("err").Op("==").Id("nil")).Block(
+									jen.Id("err").Op("=").Id("result").
+										Dot("Scan").
+										ParamsFunc(func(g *jen.Group) {
+											g.Op("&").Id("cuttleResValue")
+										}),
+								)
+								jg.Line()
+
+							default:
+								panic("unexpected " + query.Mode)
+							}
+
+							jg.Return(jen.Id("callback").ParamsFunc(func(jg *jen.Group) {
+								jg.Id("ctx")
+								jg.Id("cuttleResValue")
+								jg.Id("err")
+							}))
 						})
 
 					jg.Line().Id("cuttleStmt")

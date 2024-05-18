@@ -33,6 +33,7 @@ linters:
     - goconst
     - ireturn
     - gocyclo
+    - maintidx
 linters-settings:
   gocritic:
     disabled-checks:

@@ -23,8 +23,23 @@ type Repository struct {
 	Dialects []string
 }
 
+type Mode string
+
+var (
+	ModeExec      Mode = "exec"
+	ModeQueryMany Mode = "queryMany"
+	ModeQueryRow  Mode = "queryRow"
+)
+
+var ModeValues = map[string]Mode{
+	string(ModeExec):      ModeExec,
+	string(ModeQueryMany): ModeQueryMany,
+	string(ModeQueryRow):  ModeQueryRow,
+}
+
 type Query struct {
 	Name     string
+	Mode     Mode
 	Doc      *Doc
 	Args     []*Arg
 	Cols     []*Col
@@ -258,6 +273,16 @@ func (p *parser) parseQuery(dir *Directive, repoDialects []string) (*Query, erro
 
 	p.logger.Debug("Parsing query", "name", query.Name)
 
+	rawMode, ok := dir.Values["mode"]
+	if !ok {
+		return nil, wrapSrcError(dir.Token, "%w: no mode provided", ErrInvalidInput)
+	}
+
+	query.Mode, ok = ModeValues[rawMode]
+	if !ok {
+		return nil, wrapSrcError(dir.Token, "%w: invalid mode %v", ErrInvalidInput, rawMode)
+	}
+
 	dialects := []string{""}
 	seenDialects := make(map[string]struct{})
 
@@ -398,6 +423,20 @@ func (p *parser) parseQuery(dir *Directive, repoDialects []string) (*Query, erro
 
 	if len(query.Variants) == 0 {
 		return nil, wrapSrcError(dir.Token, "%w: no sql found", ErrInvalidInput)
+	}
+
+	switch query.Mode {
+	case ModeQueryMany:
+	case ModeQueryRow:
+		if len(query.Cols) == 0 {
+			return nil, wrapSrcError(dir.Token, "%w: query contains no columns", ErrInvalidInput)
+		}
+	case ModeExec:
+		if len(query.Cols) != 0 {
+			return nil, wrapSrcError(dir.Token, "%w: exec queries can not contain columns", ErrInvalidInput)
+		}
+	default:
+		panic("unexpected")
 	}
 
 	return query, nil
