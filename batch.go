@@ -1,10 +1,11 @@
 package cuttle
 
 type BatchEntry struct {
-	Stmt         string
-	Args         []any
-	ExecHandler  AsyncHandler[Exec]
-	QueryHandler AsyncHandler[Rows]
+	Stmt            string
+	Args            []any
+	ExecHandler     AsyncHandler[Exec]
+	QueryHandler    AsyncHandler[Rows]
+	QueryRowHandler AsyncHandler[Row]
 }
 
 type BatchRW struct {
@@ -31,8 +32,12 @@ func (b *BatchRW) Query(handler AsyncHandler[Rows], stmt string, args ...any) {
 	})
 }
 
-func (b *BatchRW) QueryRow(handler AsyncHandler[Row], stmt string, args ...any) { //nolint:revive
-	panic("implement me")
+func (b *BatchRW) QueryRow(handler AsyncHandler[Row], stmt string, args ...any) {
+	b.Entries = append(b.Entries, &BatchEntry{
+		Stmt:            stmt,
+		Args:            args,
+		QueryRowHandler: handler,
+	})
 }
 
 type BatchR struct {
@@ -51,8 +56,12 @@ func (b *BatchR) Query(handler AsyncHandler[Rows], stmt string, args ...any) {
 	})
 }
 
-func (b *BatchR) QueryRow(handler AsyncHandler[Row], stmt string, args ...any) { //nolint:revive
-	panic("implement me")
+func (b *BatchR) QueryRow(handler AsyncHandler[Row], stmt string, args ...any) {
+	b.Entries = append(b.Entries, &BatchEntry{
+		Stmt:            stmt,
+		Args:            args,
+		QueryRowHandler: handler,
+	})
 }
 
 var (

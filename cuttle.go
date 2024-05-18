@@ -64,7 +64,11 @@ type Row interface {
 	Scan(dest ...any) error
 }
 
-type Rows interface{}
+type Rows interface {
+	Close() error
+
+	Next(dest ...any) (bool, error)
+}
 
 type AsyncRTx interface {
 	Query(handler AsyncHandler[Rows], stmt string, args ...any)

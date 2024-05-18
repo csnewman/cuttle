@@ -92,12 +92,39 @@ func (t *RTx) dispatchBatch(ctx context.Context, entries []*cuttle.BatchEntry) e
 			if err := entry.QueryHandler(ctx, &Rows{res: r}, err); err != nil {
 				return err
 			}
+		} else if entry.QueryRowHandler != nil {
+			r, err := res.Query()
+			if err == nil {
+				err = r.Err()
+			}
+
+			if err == nil && !r.Next() && r.Err() == nil {
+				err = cuttle.ErrNoRows
+			}
+
+			if r != nil {
+				r.Close()
+			}
+
+			if err == nil {
+				err = r.Err()
+			}
+
+			var row *Row
+
+			if err == nil {
+				row = &Row{res: r}
+			}
+
+			if err := entry.QueryRowHandler(ctx, row, err); err != nil {
+				return err
+			}
 		} else {
 			panic("unknown entry type")
 		}
 	}
 
-	return nil
+	return res.Close()
 }
 
 type WTx struct {

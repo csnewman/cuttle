@@ -113,6 +113,30 @@ type Rows struct {
 	res pgx.Rows
 }
 
+func (r *Rows) Close() error {
+	r.res.Close()
+
+	return r.res.Err()
+}
+
+func (r *Rows) Next(dest ...any) (bool, error) {
+	if r.res.Err() != nil {
+		return false, r.Close()
+	}
+
+	if !r.res.Next() {
+		return false, r.Close()
+	}
+
+	if err := r.res.Scan(dest...); err != nil {
+		_ = r.Close()
+
+		return false, err
+	}
+
+	return true, nil
+}
+
 type Row struct {
 	res pgx.Rows
 }
