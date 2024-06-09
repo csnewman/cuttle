@@ -6,7 +6,7 @@ require (
 	github.com/dave/jennifer v1.7.0
 	github.com/iancoleman/strcase v0.3.0
 	github.com/jackc/pgx/v5 v5.5.5
-	golang.org/x/exp v0.0.0-20240409090435-93d18d7e34b8
+	github.com/tailscale/sqlite v0.0.0-20240528164426-38d2414567c9
 )
 
 require (
